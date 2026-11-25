@@ -264,7 +264,6 @@ function layout(){
   };
 }
 
-let trajIdx = null;
 function render(){
   trajIdx = null;
   Plotly.react(plotEl, buildTraces(), layout(), {responsive:true, displaylogo:false,
@@ -431,14 +430,24 @@ function bindPlot(){
     document.getElementById("detail").style.display="none";
     document.getElementById("empty").style.display="block"; syncListSel(null); render(); });
 }
-// 궤적만 추가/교체 (전체 재렌더 없이 빠르게)
+// 궤적만 추가/교체 (전체 재렌더 없이 빠르게). 연속 hover·click 이 겹치면 궤적이 두 개 남는
+// 경쟁 조건이 생기므로 작업을 순차 처리하고, 밀린 요청은 건너뛴다.
+let trajIdx = null, trajChain = Promise.resolve(), trajSeq = 0;
 function plotlyTrajRefresh(code){
+  const my = ++trajSeq;
   const tr = trajTraces(code);
-  const put = ()=> { if (tr.length){ Plotly.addTraces(plotEl, tr[0]); trajIdx = plotEl.data.length-1; } };
-  if (trajIdx != null && trajIdx < plotEl.data.length){
-    const old = trajIdx; trajIdx = null;
-    Plotly.deleteTraces(plotEl, [old]).then(put);
-  } else { trajIdx = null; put(); }
+  trajChain = trajChain.then(()=>{
+    if (my !== trajSeq) return;                    // 더 최신 요청이 있으면 이번 것은 생략
+    const stale = [];                              // 남아 있는 궤적는 모두 정리(중복 방지)
+    (plotEl.data||[]).forEach((d,i)=>{ if (String(d.name||"").startsWith("궤적 · ")) stale.push(i); });
+    trajIdx = null;
+    const del = stale.length ? Plotly.deleteTraces(plotEl, stale) : Promise.resolve();
+    return del.then(()=>{
+      if (!tr.length) return;
+      return Plotly.addTraces(plotEl, tr[0]).then(()=>{ trajIdx = plotEl.data.length-1; });
+    });
+  }).catch(()=>{});
+  return trajChain;
 }
 
 document.getElementById("presetSeg").onclick = e=>{
