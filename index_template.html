@@ -271,7 +271,8 @@ function render(){
     modeBarButtonsToRemove:["select2d","lasso2d","autoScale2d"], scrollZoom:true});
   updateStats();
   renderHiList();
-  if (state.sel) plotlyTrajRefresh(state.sel);
+  // 선택 단지가 현재 필터 밖으로 나가면 궤적만 숨긴다(카드는 유지)
+  if (state.sel && filtered().some(c=>c.c===state.sel)) plotlyTrajRefresh(state.sel);
 }
 function trajTraces(code){
   const c = DATA.complexes.find(z=>z.c===code); if (!c || !c.tr.length) return [];
