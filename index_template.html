@@ -316,7 +316,9 @@ function showDetail(code){
 /* ---------- events ---------- */
 let lastHover = null;
 function bindPlot(){
-  const on = (ev,fn)=> plotEl.addEventListener(ev,fn);
+  // Plotly 는 plotly_* 이벤트를 내부 이미터(gd.on)로만 발생시킨다. DOM addEventListener 로는
+  // 전달되지 않아 클릭·호버 시 상세 패널이 갱신되지 않으므로 on() 을 우선 사용한다.
+  const on = (ev,fn)=> (typeof plotEl.on === "function") ? plotEl.on(ev,fn) : plotEl.addEventListener(ev,fn);
   on("plotly_hover", e=>{
     const p = e.points && e.points[0]; if (!p || !/^scatter/.test(p.data.type)) return;
     const code = p.customdata && p.customdata[0];
