@@ -326,8 +326,8 @@ function renderHiList(){
     return `<button type="button" class="hirow" data-code="${esc(c.c)}" title="${esc(c.n)} 선택">`+
       `<span class="rk">${i+1}</span>`+
       `<span><span class="nm">${esc(c.n)}</span>`+
-      `<span class="mt">${esc(c.g)} ${esc(c.d)} · 입지 ${c.x.toFixed(1)}점</span></span>`+
-      `<span class="sc">${fmt(c.y2)}<small>만/평${note}</small></span>`+
+      `<span class="mt">${esc(c.g)} ${esc(c.d)} · 입지 ${c.x.toFixed(1)}점${note}</span></span>`+
+      `<span class="sc">${fmt(c.y2)}<small>만/평</small></span>`+
       `</button>`;
   }).join("");
   syncListSel(state.sel);
