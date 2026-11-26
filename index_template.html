@@ -258,9 +258,9 @@ document.getElementById("ageSeg").onclick = e=>{
 function ageOk(c){
   if (state.age === "all") return true;
   if (c.y == null) return false;               // 준공연도 결측은 '전체'에서만 표시
-  if (state.age === "5")  return c.y >= CUR_YEAR - 5 + 1;
-  if (state.age === "10") return c.y >= CUR_YEAR - 10 + 1;
-  return c.y <= CUR_YEAR - 10;                  // 10년 이상(~2015년 준공)
+  if (state.age === "5")  return c.y >= CUR_YEAR - 5;        // 2021년~ (2026년 기준 5년 이내)
+  if (state.age === "10") return c.y >= CUR_YEAR - 10;       // 2016년~ (10년 이내)
+  return c.y <= CUR_YEAR - 10 - 1;                            // 10년 이상(~2015년 준공)
 }
 
 function filtered(){
