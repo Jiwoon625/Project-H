@@ -82,6 +82,23 @@
   table.tiny thead th{color:#8b95a5;font-weight:700;border-bottom:1px solid var(--line)}
   .foot{color:var(--muted);font-size:11.5px;line-height:1.7;margin-top:12px;padding:0 2px}
   .hint{font-size:11.5px;color:var(--muted);margin-top:-2px}
+  .scd{display:flex;flex-direction:column;gap:8px;margin-top:5px}
+  .scdgrp{border-top:1px dashed #e6eaf0;padding-top:7px}
+  .scdgrp:first-child{border-top:0;padding-top:0}
+  .scdgh{display:flex;justify-content:space-between;align-items:baseline;font-size:11.5px;font-weight:800;color:#33405c}
+  .scdgh span{font-weight:700;font-size:10.5px;color:#8b95a5;font-variant-numeric:tabular-nums}
+  .scrow{display:grid;grid-template-columns:72px minmax(0,1fr) 52px;gap:7px;align-items:baseline;
+         font-size:11px;padding:2.5px 0;line-height:1.45}
+  .scrow .k{color:#7b8494;font-weight:700}
+  .scrow .v{color:#2b3444;word-break:keep-all}
+  .scrow .p{text-align:right;font-weight:800;color:#2f6fed;font-variant-numeric:tabular-nums}
+  .scrow .p i{color:#a3abb8;font-weight:600;font-style:normal;font-size:9.5px}
+  .chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}
+  .chip{background:#f2f5fa;border:1px solid #e7ecf4;border-radius:6px;padding:2px 6px;font-size:10.5px;
+        color:#4a5567;font-variant-numeric:tabular-nums;line-height:1.5}
+  .chip b{color:#2b3444;font-weight:700}
+  .chip.gen{background:#eaf7ef;border-color:#d5ecdf;color:#1d6b48}
+  .scnote{font-size:10.5px;color:#98a1af;line-height:1.55;margin-top:4px}
 </style>
 </head>
 <body>
@@ -109,6 +126,19 @@
         <select id="sido"></select>
         <select id="gu"></select>
       </div>
+    </div>
+    <div class="grp">
+      <label>건축연도</label>
+      <div class="seg" id="ageSeg">
+        <button data-age="all" class="on" title="연식 조건 없음">전체</button>
+        <button data-age="5" title="2021년 이후 준공">5년 이내</button>
+        <button data-age="10" title="2016년 이후 준공">10년 이내</button>
+        <button data-age="10p" title="2015년 이전 준공">10년 이상</button>
+      </div>
+    </div>
+    <div class="grp">
+      <label>지하철 노선</label>
+      <select id="line"></select>
     </div>
     <div class="grp">
       <label>단지명 검색</label>
@@ -161,8 +191,14 @@ const CUTS = {
   metro:  {x:[30,60], y:[2000,3500], label:"수도권 (X 30/60점 · Y 2,000/3,500만)"},
   nation: {x:[30,60], y:[1500,3000], label:"전국 (X 30/60점 · Y 1,500/3,000만)"}
 };
-const state = {preset:"metro", period:10, sido:"", gu:"", q:"", quick:false, sizeMode:"fix", sel:null};
+const state = {preset:"metro", period:10, sido:"", gu:"", q:"", quick:false, sizeMode:"fix",
+               age:"all", line:"", sel:null};
+const POOL = DATA.pool || [], SNM = i => POOL[i] || "";
+const SMA = (DATA.meta && DATA.meta.smax) || [24,3,3,12,8,10,10,6,5,4,8,7];
+const CUR_YEAR = DATA.curyear || 2026;
+const AGE_LABEL = {all:"전체 연식", "5":"5년 이내", "10":"10년 이내", "10p":"10년 이상"};
 
+const esc = s => String(s==null?"":s).replace(/[&<>"]/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
 const fmt = (v,d=0)=> v==null ? "–" : v.toLocaleString("ko-KR",{minimumFractionDigits:d,maximumFractionDigits:d});
 const fmtEok = v => v==null ? "–" : (v/10000).toFixed(2)+"억";
 const tier = (v,cuts) => v==null ? null : (v < cuts[0] ? "하" : (v < cuts[1] ? "중" : "상"));
@@ -200,12 +236,41 @@ sidoSel.onchange = ()=>{ state.sido = sidoSel.value; fillGu(); render(); };
 guSel.onchange = ()=>{ state.gu = guSel.value; render(); };
 fillGu();
 
+/* 지하철 노선 필터 옵션: 1~9호선 숫자순 → 수도권 주요 노선 → 기타 가나다순 */
+const LINE_ORDER = ["1호선","2호선","3호선","4호선","5호선","6호선","7호선","8호선","9호선",
+  "경의중앙선","수인분당선","신분당선","경춘선","공항철도","우이신설선","신림선","서해선",
+  "GTX-A","경강선","김포골드라인","인천1호선","인천2호선"];
+const lineRank = l => { const i = LINE_ORDER.indexOf(l); return i < 0 ? 900 : i; };
+const lineSel = document.getElementById("line");
+(()=>{
+  const cnt = {};
+  DATA.complexes.forEach(c=>(c.ln||[]).forEach(l=>{ cnt[l] = (cnt[l]||0)+1; }));
+  const keys = Object.keys(cnt).sort((a,b)=> lineRank(a)-lineRank(b) || a.localeCompare(b,"ko"));
+  lineSel.innerHTML = '<option value="">전체 노선</option>' +
+    keys.map(l=>`<option value="${esc(l)}">${esc(l)} (${cnt[l]})</option>`).join("");
+})();
+lineSel.onchange = ()=>{ state.line = lineSel.value; render(); if (state.sel) plotlyTrajRefresh(state.sel); };
+document.getElementById("ageSeg").onclick = e=>{
+  const b = e.target.closest("button"); if(!b) return;
+  [...e.currentTarget.children].forEach(x=>x.classList.toggle("on", x===b));
+  state.age = b.dataset.age; render(); if (state.sel) plotlyTrajRefresh(state.sel);
+};
+function ageOk(c){
+  if (state.age === "all") return true;
+  if (c.y == null) return false;               // 준공연도 결측은 '전체'에서만 표시
+  if (state.age === "5")  return c.y >= CUR_YEAR - 5 + 1;
+  if (state.age === "10") return c.y >= CUR_YEAR - 10 + 1;
+  return c.y <= CUR_YEAR - 10;                  // 10년 이상(~2015년 준공)
+}
+
 function filtered(){
   const cuts = CUTS[state.preset];
   const ql = state.q.trim().toLowerCase();
   return DATA.complexes.filter(c=>{
     if (state.sido && c.si !== state.sido) return false;
     if (state.gu && c.g !== state.gu) return false;
+    if (!ageOk(c)) return false;
+    if (state.line && !(c.ln || []).includes(state.line)) return false;
     if (ql && !(c.n.toLowerCase().includes(ql) || c.d.toLowerCase().includes(ql))) return false;
     if (state.quick && quadOf(c,cuts)!=="입지상·시세하") return false;
     return true;
@@ -301,7 +366,6 @@ function updateStats(){
     `<span class="pill">컷 ${CUTS[state.preset].label}</span>`;
 }
 /* ---------- 선택 지역의 입지 상·시세 하 목록 ---------- */
-const esc = s => String(s==null?"":s).replace(/[&<>"]/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
 function hiItems(){
   const cuts = CUTS[state.preset];
   return filtered()
@@ -312,7 +376,8 @@ function renderHiList(){
   const cuts = CUTS[state.preset];
   const items = hiItems();
   document.getElementById("hiCount").textContent = fmt(items.length)+"곳";
-  const scope = [state.sido||"전체 지역", state.gu||"", state.q.trim()?`"${state.q.trim()}" 검색`:""]
+  const scope = [state.sido||"전체 지역", state.gu||"", state.q.trim()?`"${state.q.trim()}" 검색`:"",
+    state.age!=="all"? `연식 ${AGE_LABEL[state.age]}`:"", state.line||""]
     .filter(Boolean).join(" · ");
   document.getElementById("hiScope").textContent =
     `${scope} · 입지 60점 이상 & 평당 ${fmt(cuts.y[0])}만원 미만 · 입지 점수 높은 순`;
@@ -359,6 +424,62 @@ document.getElementById("hiList").addEventListener("click", e=>{
   selectComplex(row.dataset.code);
 });
 
+/* ---------- 세부 점수 산출 상세 근거 ---------- */
+function evRow(k, v, pts, max){
+  return `<div class="scrow"><span class="k">${k}</span><span class="v">${v}</span>`+
+    `<span class="p">${pts==null?"–":pts.toFixed(1)}<i>/${max}</i></span></div>`;
+}
+function chipOf(i, d, tag, cls){
+  return `<span class="chip${cls?" "+cls:""}">${esc(SNM(i))} <b>${fmt(d)}m</b>${tag?" · "+tag:""}</span>`;
+}
+function evidenceHtml(c){
+  const P = c.sb || [];
+  const ln = c.ln || [], nl = c.nl || 0;
+  const sch = c.sch || [];
+  const elem = sch.filter(x=>x[2]===0);
+  const lvt = ["초","중","고"];
+  const near = a => a.length ? `${esc(SNM(a[0][0]))} <b>${fmt(a[0][1])}m</b>` : "반경 내 없음";
+  const ageTxt = c.y!=null ? `${Math.round(c.y)}년 준공 · ${CUR_YEAR-Math.round(c.y)}년 경과` : "준공 정보 없음";
+  const mNotes = (c.mts||[]).map(([i,d,k])=>chipOf(i,d,k?"대형슈퍼":"대형마트"));
+  const hNotes = (c.hps||[]).map(([i,d,g])=>chipOf(i,d,g?"종합병원":"병원",g?"gen":""));
+  const groups = [
+    {name:"교통", max:30, rows:[
+      ["최근접역", c.sn? `${esc(c.sn)} <b>${c.sd!=null?fmt(c.sd)+"m":""}</b>` : "역 정보 없음", P[0], 24],
+      ["800m 내 역", `${c.n8||0}곳`, P[1], 3],
+      ["환승 노선", nl? `K-apt 기재 ${nl}개` : "K-apt 노선 미기재", P[2], 3]
+    ], chips:(c.sts||[]).map(([i,d])=>chipOf(i,d)).join(""),
+     note: (nl < 2 && ln.length >= 2)
+       ? `K-apt 단지정보의 노선 기재가 부족해 노선 점수는 ${(P[2]||0).toFixed(1)}/3점으로 낮게 산정됩니다(주변 노선 ${ln.join("·")}).`
+       : (ln.length? `주변 노선: ${ln.join(" · ")}` : "")},
+    {name:"교육", max:20, rows:[
+      ["초등 근접", near(elem), P[3], 12],
+      ["중·고교 수", `${c.nmh||0}곳 (반경 1.5km)`, P[4], 8]
+    ], chips: sch.map(([i,d,l])=>chipOf(i,d,lvt[l])).join(""),
+     note:"초등학교는 최근접 거리, 중·고교는 개수로 점수화합니다(7곳 이상 만점)."},
+    {name:"인프라", max:20, rows:[
+      ["대형마트", c.mb!=null? `최근접 <b>${fmt(c.mb)}m</b> · 1km 내 ${c.mk||0}곳` : "반경 1.2km 내 대형마트 없음", P[5], 10],
+      ["의료", `${c.hg!=null? `종합병원 <b>${fmt(c.hg)}m</b>` : "종합병원 없음"} · 의원 ${c.md!=null?fmt(c.md)+"m":"–"} · 500m 내 ${c.m5||0}곳`, P[6], 10]
+    ], chips: mNotes.concat(hNotes).join(""),
+     note: DATA.meta.park},
+    {name:"상품성", max:15, rows:[
+      ["규모", c.h==null? "–" : `<b>${fmt(c.h)}세대</b>`, P[7], 6],
+      ["연식", ageTxt, P[8], 5],
+      ["설비", `${c.ht||"난방 미상"} · ${c.mg||"관리 미상"} · ${c.tf?"최고 "+c.tf+"층":"층수 미상"}`, P[9], 4]
+    ], chips:"", note:"규모는 3,000세대 만점, 연식은 5년 이내 만점, 설비는 난방·관리·층수로 점수화합니다."},
+    {name:"수요", max:15, rows:[
+      ["회전율", `<b>${c.nc||0}건</b> / ${fmt(c.h)}세대${c.tv!=null? " = "+(c.tv*100).toFixed(2)+"%":""}`, P[10], 8],
+      ["전세가율", c.jr==null? "–" : `<b>${(c.jr*100).toFixed(1)}%</b>`, P[11], 7]
+    ], chips:"", note:"회전율은 최근 3개월 거래 건수 ÷ 세대수, 전세가율은 65% 만점입니다."}
+  ];
+  return groups.map(g=>{
+    const sum = g.rows.reduce((a,r)=>a+(r[2]||0),0);
+    return `<div class="scdgrp"><div class="scdgh">${g.name}<span>${sum.toFixed(1)} / ${g.max}</span></div>`+
+      g.rows.map(r=>evRow(r[0],r[1],r[2],r[3])).join("")+
+      (g.chips? `<div class="chips">${g.chips}</div>`:"")+
+      (g.note? `<div class="scnote">${g.note}</div>`:"")+`</div>`;
+  }).join("");
+}
+
 function showDetail(code){
   state.sel = code;
   const c = DATA.complexes.find(z=>z.c===code); if (!c) return;
@@ -398,6 +519,13 @@ function showDetail(code){
     <div style="margin-top:6px">
       <div class="hint" style="font-weight:700;color:#6b7686">축별 점수</div>
       <div class="bars">${bars}</div>
+    </div>
+    <div style="margin-top:12px">
+      <div class="hint" style="font-weight:700;color:#6b7686">점수 산출 상세 근거</div>
+      <div class="scd">${evidenceHtml(c)}</div>
+      <div class="scnote" style="margin-top:7px;border-top:1px solid #f0f2f5;padding-top:6px">
+        12개 세부 항목 만점 합계가 입지 100점입니다. 거리·수량은 구간표로 환산합니다(예: 역 200m 이내 24점 만점, 800m 내 역 2곳 이상 3점 만점).
+      </div>
     </div>
     <div style="margin-top:8px">
       <div class="hint" style="font-weight:700;color:#6b7686">연도별 궤적</div>
@@ -484,7 +612,10 @@ document.getElementById("foot").innerHTML =
   `데이터: 국토교통부 실거래가 공개시스템(매매·전월세, 2016~2026) · K-apt 공동주택 단지정보 · 카카오 로컬(주변시설) · ` +
   `입지 점수는 교통 30 · 교육 20 · 인프라 20 · 상품성 15 · 수요/환금성 15 = 100점.<br>` +
   `가격 미표기 단지는 최근 3개월 59~85.5㎡ 실거래가 없어 9분면에 표시되지 않습니다(통계에는 포함). ` +
-  `2026년 11월은 신고 지연으로 거래 건수가 적을 수 있습니다.`;
+  `2026년 11월은 신고 지연으로 거래 건수가 적을 수 있습니다.<br>` +
+  `건축연도 필터는 준공연도 기준(5년 이내 = 2021년 이후, 10년 이상 = 2015년 이전)이며 준공연도 미상 단지는 '전체'에서만 표시됩니다. ` +
+  `지하철 노선 필터는 단지 반경 1.5km 내 역의 노선을 기준으로 하며, 노선 수 점수 자체는 K-apt 단지정보 기재를 기준으로 산정됩니다. ` +
+  `공원은 1단계 모델에서 미수집입니다.`;
 render();
 setTimeout(bindPlot, 800);
 </script>
