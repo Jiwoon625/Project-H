@@ -33,4 +33,6 @@ python tools/access.py inputs
 python tools/build.py
 ```
 
+메모리가 작은 환경(2GB)에서 일부 지역만 추가할 때는 좌표를 단지·학교 주변만 보관하는 `tools/school_routes_fast.py`를 같은 인자로 대신 돌리고, 기존 `access.js`의 기존 단지 값은 그대로 두고 새 단지만 합치는 `tools/merge_access.py commute.json routes.json`을 쓸 수 있습니다. `school_routes_fast.py`는 안양 224건으로 교차검증했고(217건 10m 이내, 평균 오차 2.9m), 그 밖의 규칙은 `school_routes.py`와 같습니다.
+
 추가 지표는 단지코드와 좌표로 결합합니다. 거래월은 스냅샷 시각이 일치할 때만 노출됩니다. 기존 데이터 수집기는 별도 작업 경로의 `work-apt/seoul/pipeline.py`입니다.
