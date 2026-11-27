@@ -676,7 +676,7 @@ function showDetail(code){
       <h2>${c.n}</h2><span class="badge">${q}</span>
     </div>
     <div class="hint" style="margin-top:2px">${c.g} ${c.d} · ${c.s||"–"}${c.t?" · "+c.t:""}</div>
-    <div class="hint" style="margin-top:5px">선택 고정됨 · 다른 단지를 클릭하면 바뀌고 차트 빈 곳을 더블클릭하면 해제됩니다.<button type="button" class="unpin" data-unpin="1">선택 해제</button></div>
+    ${pinned ? `<div class="hint" style="margin-top:5px">선택 고정됨 · 다른 단지를 클릭하면 바뀌고 차트 빈 곳을 더블클릭하면 해제됩니다.<button type="button" class="unpin" data-unpin="1">선택 해제</button></div>` : `<div class="hint" style="margin-top:5px">차트에 마우스를 올려 보는 중입니다. 클릭하면 이 단지로 고정됩니다.</div>`}
     <dl class="kv" style="margin-top:10px">
       <dt>입지 점수</dt><dd style="color:#16756a">${scores.get(c.c).x==null?"산출 보류":fmt(scores.get(c.c).x,1)+"점"}</dd>
       <dt>평당가</dt><dd>${fmt(c.y2)}만${c.stl?` <span style="color:#977238;font-weight:600">(${c.stl}분기 전)</span>`:""}</dd>
