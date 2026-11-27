@@ -6,6 +6,7 @@
 <title>서울·수도권 아파트 입지 × 시세 9분면 대시보드</title>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
 <style>
+  [hidden]{display:none!important} #matches button{cursor:pointer} .sources{font-size:12px;line-height:1.7} details{margin:8px 0} summary{cursor:pointer}
   :root{
     --bg:#f6f7f9; --card:#fff; --ink:#1c2430; --muted:#6b7686; --line:#e3e7ec;
     --accent:#d1495b; --accent2:#2f6fed; --good:#2f9e6b; --warn:#e0a01e;
@@ -110,14 +111,18 @@
 <div class="wrap">
   <div class="card controls">
     <div class="grp">
-      <label>컷 프리셋</label>
+      <label for="view">가격 보기</label>
+      <select id="view"><option value="r59">59㎡ 비교단지 대비</option><option value="r84">84㎡ 비교단지 대비</option><option value="absolute">절대 평당가</option><option value="history">기존 종합점수 · 과거 궤적</option></select>
+    </div>
+    <div class="grp" id="presetGroup">
+      <label>가격 기준</label>
       <div class="seg" id="presetSeg">
         <button data-preset="metro" class="on">수도권</button>
         <button data-preset="nation">전국</button>
       </div>
     </div>
     <div class="grp">
-      <label>궤적 기간 · <span id="periodVal">10년</span></label>
+      <label for="period">궤적 기간 · <span id="periodVal">10년</span></label>
       <input type="range" id="period" min="1" max="10" step="1" value="10">
     </div>
     <div class="grp">
@@ -142,7 +147,7 @@
     </div>
     <div class="grp">
       <label>단지명 검색</label>
-      <input type="search" id="q" placeholder="예: 화곡, 래미안">
+      <input type="search" id="q" aria-label="단지명 또는 동 검색" placeholder="예: 화곡, 래미안">
     </div>
     <label class="chk" id="quickWrap">
       <input type="checkbox" id="quick"> 입지 상 &amp; 시세 하만
@@ -157,6 +162,7 @@
   </div>
 
   <div class="stats" id="stats"></div>
+  <div id="matches" class="stats" aria-label="검색한 단지"></div>
 
   <div class="main">
     <div class="card" id="plot"></div>
@@ -172,9 +178,7 @@
       <div class="card sidecard" id="detailCard">
         <div class="sidehead"><h2 style="font-size:14px;color:#3b4557">선택한 단지 세부사항</h2></div>
         <div class="empty" id="empty">
-          점이나 목록의 단지를 <b>클릭</b>하거나 그래프에 마우스를 올리면 그 단지의 <b>연도별 궤적</b>과 상세 지표가 여기에 표시됩니다.<br><br>
-          · X축 = 입지 100점 (교통 30 · 교육 20 · 인프라 20 · 상품성 15 · 수요 15)<br>
-          · Y축 = 전용 59~85.5㎡ 최근 3개월 중위 <b>평당가</b>(만원/평, 공급면적 환산)
+          단지를 선택하면 비교가격, 출근시간, 배정 초등학교와 통학 경로를 볼 수 있습니다. 가격이나 입지점수가 없는 단지도 이름으로 검색할 수 있습니다.
         </div>
         <div id="detail" style="display:none"></div>
       </div>
@@ -184,6 +188,8 @@
   <div class="foot" id="foot"></div>
 </div>
 
+<script src="access.js"></script>
+<script src="model.js"></script>
 <script>
 const DATA = /*__DATA__*/;
 const POINTS = DATA.points, YEARS = DATA.years, LAST = POINTS.length - 1;
@@ -191,7 +197,7 @@ const CUTS = {
   metro:  {x:[30,60], y:[2000,3500], label:"수도권 (X 30/60점 · Y 2,000/3,500만)"},
   nation: {x:[30,60], y:[1500,3000], label:"전국 (X 30/60점 · Y 1,500/3,000만)"}
 };
-const state = {preset:"metro", period:10, sido:"", gu:"", q:"", quick:false, sizeMode:"fix",
+const state = {view:"r59", preset:"metro", period:10, sido:"", gu:"", q:"", quick:false, sizeMode:"fix",
                age:"all", line:"", sel:null};
 const POOL = DATA.pool || [], SNM = i => POOL[i] || "";
 const SMA = (DATA.meta && DATA.meta.smax) || [24,3,3,12,8,10,10,6,5,4,8,7];
@@ -202,10 +208,37 @@ const esc = s => String(s==null?"":s).replace(/[&<>"]/g, m=>({"&":"&amp;","<":"&
 const fmt = (v,d=0)=> v==null ? "–" : v.toLocaleString("ko-KR",{minimumFractionDigits:d,maximumFractionDigits:d});
 const fmtEok = v => v==null ? "–" : (v/10000).toFixed(2)+"억";
 const tier = (v,cuts) => v==null ? null : (v < cuts[0] ? "하" : (v < cuts[1] ? "중" : "상"));
+const scores = new Map();
+const comparisons = {r59:peerComparisons(DATA.complexes,59),r84:peerComparisons(DATA.complexes,84)};
+function accessFor(c){
+  const a = ACCESS.homes[c.c];
+  return a && a.lat === c.lat && a.lng === c.lng ? a : null;
+}
+for (const c of DATA.complexes) scores.set(c.c,assessment(c,accessFor(c)));
+const isRelative = () => state.view === "r59" || state.view === "r84";
+const areaOf = () => state.view === "r84" ? 84 : 59;
+const peer = c => comparisons[state.view]?.get(c.c);
+const xValue = c => state.view === "history" ? c.x : scores.get(c.c).x;
+const yValue = c => isRelative() ? peer(c)?.gap ?? null : c.y2;
+const cutsNow = () => isRelative() ? {x:[30,60],y:[-10,10],label:"입지 30 / 60점 · 비교가격 ±10%"} : CUTS[state.preset];
+const gapText = value => value == null ? "비교 부족" : (value>0?"+":"")+fmt(value,1)+"%";
+function pricePeriod(c){
+  if(c.y2 == null) return "가격 없음";
+  return c.stl ? c.stl+"분기 전" : POINTS[LAST];
+}
+function evidenceLabel(c){
+  if(isRelative()){
+    const r=peer(c);
+    const month=ACCESS.snapshot===DATA.generated ? accessFor(c)?.months?.[areaOf()] : null;
+    return (r?.confidence || "자료 부족")+" · "+(month || "거래월 미확인")+" · 해당 면적 "+(c["n"+areaOf()] || 0)+"건 · 비교 "+(r?.peers.length || 0)+"곳";
+  }
+  return pricePeriod(c)+" · 최근 "+fmt(c.nc)+"건";
+}
 function quadOf(c, cuts){
-  const tx = tier(c.x, cuts.x);
-  if (c.y2==null) return "입지"+tx+"·가격미상";
-  return "입지"+tx+"·시세"+tier(c.y2, cuts.y);
+  const x=xValue(c), y=yValue(c);
+  if (x == null || y == null) return "자료 부족";
+  const ty = isRelative() && y <= -10 ? "하" : tier(y,cuts.y);
+  return "입지"+tier(x,cuts.x)+"·시세"+ty;
 }
 const QUAD_STYLE = {
   "입지상·시세하":{color:"#d1495b",size:11,line:"#8e1226"},
@@ -264,7 +297,7 @@ function ageOk(c){
 }
 
 function filtered(){
-  const cuts = CUTS[state.preset];
+  const cuts = cutsNow();
   const ql = state.q.trim().toLowerCase();
   return DATA.complexes.filter(c=>{
     if (state.sido && c.si !== state.sido) return false;
@@ -280,8 +313,8 @@ function filtered(){
 /* ---------- plot ---------- */
 const plotEl = document.getElementById("plot");
 function buildTraces(){
-  const cuts = CUTS[state.preset];
-  const list = filtered().filter(c=>c.x!=null && c.y2!=null);
+  const cuts = cutsNow();
+  const list = filtered().filter(c=>xValue(c)!=null && yValue(c)!=null);
   const useGL = false;   // SVG 고정(구형 브라우저·임베드 호환). 필요 시 list.length>4000 로 전환
   const groups = {};
   list.forEach(c=>{ const q = quadOf(c,cuts); (groups[q] ||= []).push(c); });
@@ -291,12 +324,12 @@ function buildTraces(){
     const sizes = state.sizeMode==="house" ? g.map(c=> Math.max(4, Math.min(26, Math.sqrt(c.h||50)*0.62))) : st.size;
     traces.push({
       type: useGL ? "scattergl" : "scatter", mode:"markers", name:`${q} (${g.length})`,
-      x:g.map(c=>c.x), y:g.map(c=>c.y2),
+      x:g.map(xValue), y:g.map(yValue),
       marker:{size:sizes, color:st.color, line:{width: q==="입지상·시세하"?1.6:0.5, color:st.line}, opacity: q==="입지상·시세하"?0.95:0.72},
       customdata:g.map(c=>[
         c.c, c.n, c.g+" "+c.d,
         (c.h==null?"–":fmt(c.h))+"세대 · "+(c.y==null?"준공 미상":Math.round(c.y)+"년"),
-        "입지 "+c.x.toFixed(1)+"점 · 평당 "+fmt(c.y2)+"만"+(c.stl?" (ci."+c.stl+"분기 전)":""),
+        "점수 "+xValue(c).toFixed(1)+" · "+(isRelative()?gapText(yValue(c)):"평당 "+fmt(c.y2)+"만")+" · "+evidenceLabel(c),
         (c.sn? c.sn+" ":"")+fmt(c.sd)+"m"+(c.wd?" · "+c.wd:"")+" · 전세가율 "+(c.jr==null?"–":(c.jr*100).toFixed(0)+"%"),
         c.jr, c.nc
       ]),
@@ -310,7 +343,7 @@ function buildTraces(){
   return traces;
 }
 function layout(){
-  const cuts = CUTS[state.preset];
+  const cuts = cutsNow();
   const shapes = [
     ...cuts.x.map(v=>({type:"line",x0:v,x1:v,y0:0,y1:1,yref:"paper",line:{color:"#c9d0da",width:1,dash:"dot"}})),
     ...cuts.y.map(v=>({type:"line",y0:v,y1:v,x0:0,x1:1,xref:"paper",line:{color:"#c9d0da",width:1,dash:"dot"}}))
@@ -318,8 +351,8 @@ function layout(){
   return {
     margin:{l:58,r:16,t:16,b:46}, hovermode:"closest", dragmode:"pan",
     shapes,
-    xaxis:{title:{text:"입지 점수 (100점 만점)",font:{size:12}}, range:[0,100], gridcolor:"#eef1f5", zeroline:false},
-    yaxis:{title:{text:"평당가 (만원/평 · 전용 59~85.5㎡ 3개월 중위)",font:{size:12}}, gridcolor:"#eef1f5", zeroline:false},
+    xaxis:{title:{text:state.view === "history" ? "기존 종합점수 (점)" : "입지점수 (점)",font:{size:12}}, range:[0,100], gridcolor:"#eef1f5", zeroline:false},
+    yaxis:{title:{text:isRelative() ? areaOf()+"㎡ 비교단지 대비 가격 차이 (%)" : "평당가 (만원/평 · 공급면적 환산)",font:{size:12}}, gridcolor:"#eef1f5", zeroline:false},
     legend:{orientation:"h", y:-0.16, x:0, font:{size:11}},
     plot_bgcolor:"#fff", paper_bgcolor:"#fff",
     annotations:[
@@ -330,6 +363,16 @@ function layout(){
 }
 
 function render(){
+  document.getElementById("presetGroup").hidden=isRelative();
+  document.getElementById("period").parentElement.hidden=state.view!=="history";
+  const matches=state.q.trim()?filtered().slice(0,30):[];
+  document.getElementById("matches").innerHTML=matches.map(c=>`<button type="button" class="pill" data-code="${esc(c.c)}">${esc(c.n)} · ${esc(c.d)}</button>`).join("");
+  if (state.sel && filtered().some(c=>c.c===state.sel)) showDetail(state.sel);
+  else if(state.sel){
+    state.sel=null;lastHover=null;
+    document.getElementById("empty").style.display="block";
+    document.getElementById("detail").style.display="none";
+  }
   trajIdx = null;
   Plotly.react(plotEl, buildTraces(), layout(), {responsive:true, displaylogo:false,
     modeBarButtonsToRemove:["select2d","lasso2d","autoScale2d"], scrollZoom:true});
@@ -341,7 +384,8 @@ function render(){
 function trajTraces(code){
   const c = DATA.complexes.find(z=>z.c===code); if (!c || !c.tr.length) return [];
   const startIdx = LAST - state.period;
-  const pts = c.tr.filter(p=>p[0]>=startIdx);
+  if (state.view !== "history") return [];
+  const pts = c.tr.filter(p=>p[0]>=startIdx && (c.y == null || YEARS[p[0]]>=c.y));
   if (pts.length<1) return [];
   const xs = pts.map(p=>p[1]), ys = pts.map(p=>p[2]), yrs = pts.map(p=>YEARS[p[0]]);
   return [{
@@ -349,50 +393,57 @@ function trajTraces(code){
     x:xs, y:ys, text:yrs.map(String), textposition:"top center",
     textfont:{size:9.5,color:"#2f3440"},
     line:{color:"#111",width:2.4}, marker:{size:7,color:"#111",line:{color:"#fff",width:1.5}},
-    hovertemplate:"<b>%{text}년</b><br>입지 %{x:.1f}점 · 평당 %{y:,.0f}만<extra></extra>",
+    hovertemplate:"<b>%{text}년</b><br>기존 종합 %{x:.1f}점 · 평당 %{y:,.0f}만<extra></extra>",
     showlegend:false
   }];
 }
 function updateStats(){
-  const list = filtered(), cuts = CUTS[state.preset];
-  const priced = list.filter(c=>c.y2!=null);
+  const list = filtered(), cuts = cutsNow();
+  const priced = list.filter(c=>yValue(c)!=null && xValue(c)!=null);
   const nHi = list.filter(c=>quadOf(c,cuts)==="입지상·시세하").length;
   const gus = new Set(list.map(c=>c.g));
   document.getElementById("stats").innerHTML =
     `<span class="pill">단지 <b>${fmt(list.length)}</b></span>`+
-    `<span class="pill">가격 확인 <b>${fmt(priced.length)}</b></span>`+
+    `<span class="pill">차트 표시 <b>${fmt(priced.length)}</b></span>`+
     `<span class="pill">입지 상·시세 하 <b style="color:#d1495b">${fmt(nHi)}</b></span>`+
     `<span class="pill">지역 <b>${gus.size}</b>개 구</span>`+
-    `<span class="pill">컷 ${CUTS[state.preset].label}</span>`;
+    `<span class="pill">기준 ${cuts.label}</span>`;
 }
 /* ---------- 선택 지역의 입지 상·시세 하 목록 ---------- */
 function hiItems(){
-  const cuts = CUTS[state.preset];
+  const cuts = cutsNow();
   return filtered()
-    .filter(c=>c.x!=null && c.y2!=null && quadOf(c,cuts)==="입지상·시세하")
-    .sort((a,b)=> b.x-a.x || a.y2-b.y2 || a.n.localeCompare(b.n,"ko"));
+    .filter(c=>xValue(c)!=null && yValue(c)!=null && quadOf(c,cuts)==="입지상·시세하")
+    .sort((a,b)=>{
+      if (isRelative()){
+        const rank = {"높음":0,"보통":1,"낮음":2};
+        return rank[peer(a).confidence]-rank[peer(b).confidence] || yValue(a)-yValue(b) || a.c.localeCompare(b.c);
+      }
+      return (a.stl||0)-(b.stl||0) || Math.min(3,b.nc)-Math.min(3,a.nc) || xValue(b)-xValue(a);
+    });
 }
 function renderHiList(){
-  const cuts = CUTS[state.preset];
+  const cuts = cutsNow();
   const items = hiItems();
   document.getElementById("hiCount").textContent = fmt(items.length)+"곳";
   const scope = [state.sido||"전체 지역", state.gu||"", state.q.trim()?`"${state.q.trim()}" 검색`:"",
     state.age!=="all"? `연식 ${AGE_LABEL[state.age]}`:"", state.line||""]
     .filter(Boolean).join(" · ");
   document.getElementById("hiScope").textContent =
-    `${scope} · 입지 60점 이상 & 평당 ${fmt(cuts.y[0])}만원 미만 · 입지 점수 높은 순`;
+    isRelative() ? `${scope} · 입지 60점 이상 · ${areaOf()}㎡ 비교군보다 10% 이상 저렴 · 신뢰도, 가격 차이 순`
+    : `${scope} · 60점 이상 · 평당 ${fmt(cuts.y[0])}만원 미만 · 최근 가격과 거래 건수 우선`;
   const box = document.getElementById("hiList");
   if (!items.length){
     box.innerHTML = `<div class="empty" style="padding:10px 2px">현재 조건에 해당하는 단지가 없습니다.<br>지역을 넓히거나 컷 프리셋을 바꿔 보세요.</div>`;
     return;
   }
   box.innerHTML = items.map((c,i)=>{
-    const note = c.stl ? ` · ${c.stl}분기 전` : "";
+    const note = " · "+evidenceLabel(c);
     return `<button type="button" class="hirow" data-code="${esc(c.c)}" title="${esc(c.n)} 선택">`+
       `<span class="rk">${i+1}</span>`+
       `<span><span class="nm">${esc(c.n)}</span>`+
-      `<span class="mt">${esc(c.g)} ${esc(c.d)} · 입지 ${c.x.toFixed(1)}점${note}</span></span>`+
-      `<span class="sc">${fmt(c.y2)}<small>만/평</small></span>`+
+      `<span class="mt">${esc(c.g)} ${esc(c.d)} · 점수 ${xValue(c).toFixed(1)}${note}</span></span>`+
+      `<span class="sc">${isRelative()?gapText(yValue(c)):fmt(c.y2)}<small>${isRelative()?"비교군 대비":"만/평"}</small></span>`+
       `</button>`;
   }).join("");
   syncListSel(state.sel);
@@ -481,10 +532,42 @@ function evidenceHtml(c){
   }).join("");
 }
 
+function comparisonPanel(c,area){
+  const r=comparisons["r"+area].get(c.c);
+  const month=ACCESS.snapshot===DATA.generated ? accessFor(c)?.months?.[area] : null;
+  const date=month || (c["n"+area] ? "월 미확인 · "+POINTS[LAST] : "해당 기간 거래 없음");
+  const summary=`${area}㎡ · ${gapText(r?.gap)} · ${r?.confidence||"자료 부족"}`;
+  const prices=r?.peers.map(p=>`<tr><td>${esc(p.n)}</td><td>${fmtEok(p["p"+area])}</td><td>${p["n"+area]}</td></tr>`).join("") || "";
+  return `<details ${isRelative() && area===areaOf()?"open":""}><summary>${summary}</summary>
+    <dl class="kv"><dt>우리 단지 중위가격</dt><dd>${fmtEok(c["p"+area])} · ${c["n"+area]||0}건</dd>
+    <dt>최근 계약월</dt><dd>${date}</dd><dt>비교단지 중위가격</dt><dd>${fmtEok(r?.median)}</dd>
+    <dt>비교 근거</dt><dd>${r?.scope||"–"} · ${r?.peers.length||0}곳 · ${r?.trades||0}건</dd></dl>
+    <p class="sources">같은 주택유형·면적형, 2km 이내, 준공 ±5년. 같은 동에서 3곳 미만이면 같은 구까지 비교합니다.</p>
+    ${prices?`<details><summary>비교한 단지와 거래가</summary><table class="tiny"><tr><th>단지</th><th>중위가격</th><th>건수</th></tr>${prices}</table></details>`:""}
+    </details>`;
+}
+
+function currentEvidence(c){
+  const s=scores.get(c.c), a=accessFor(c);
+  const lines=[["업무지구 접근",s.trips,36],["역 접근",s.rail,14],["배정 초교 통학",s.school,18],["중·고교 접근",s.secondary,4],["생활 인프라",s.amenities,28]];
+  const components=lines.map(([name,value,max])=>`<dt>${name}</dt><dd>${fmt(value,1)} / ${max}</dd>`).join("");
+  const hubs=ACCESS.hubs.map((name,i)=>`<dt>${esc(name)}</dt><dd>${a?.times?.[i]!=null?a.times[i]+"분":"경로 미확인"}</dd>`).join("");
+  const schools=(a?.schools||[]).map(([name,meters,cross,homeGate,schoolGate,steps,slope])=>
+    `<p><b>${esc(name)}</b> · ${meters==null?"경로 미확인":fmt(meters)+"m · 약 "+Math.ceil(meters/72)+"분"}<br>${meters==null?"":(homeGate?"단지 출입구":"단지 대표점")+" → "+(schoolGate?"교문":"학교 대표점")+" · 지도에 표시된 주요도로 횡단 지점 "+cross+"개"+(steps?" · 계단 구간 있음":"")+(slope!=null?" · 경사 태그 최대 "+fmt(slope,1)+"%":" · 경사 자료 없음")}</p>`).join("");
+  return `<h3>면적형별 가격 비교</h3>${comparisonPanel(c,59)}${comparisonPanel(c,84)}
+    <h3>입지 · 상품성 · 환금성</h3><dl class="kv"><dt>입지</dt><dd>${s.x==null?"자료 부족":fmt(s.x,1)+" / 100"}</dd>
+    <dt>상품성</dt><dd>${fmt(s.product,1)} / 100</dd><dt>환금성 지표</dt><dd>${fmt(s.demand,1)} / 100</dd></dl>
+    <details><summary>입지점수 구성</summary><dl class="kv">${components}</dl></details>
+    <h3>오전 9시 도착 기준 출근시간</h3><dl class="kv">${hubs}</dl>
+    <p class="sources">KTDB 배포 시간표로 계산한 추정치입니다(원본 파일 2025년 5월 작성). 도보·대기·환승을 포함하며 혼잡과 지연은 반영하지 않습니다.</p>
+    <h3>초등학교 통학</h3>${schools||"<p>통학구역 연결 자료 없음</p>"}
+    <p class="sources">2026년 9월 통학구역과 단지 대표점의 교차 결과입니다. 시간은 보행망 거리와 시속 4.32km로 계산했습니다. 횡단·계단 정보는 지도에 등록된 범위입니다.</p>`;
+}
+
 function showDetail(code){
   state.sel = code;
   const c = DATA.complexes.find(z=>z.c===code); if (!c) return;
-  const cuts = CUTS[state.preset], q = quadOf(c, cuts);
+  const cuts = cutsNow(), q = quadOf(c, cuts);
   const axes = ["교통","교육","인프라","상품성","수요"];
   const sums = [0,0,0,0,0];
   const idx = [[0,1,2],[3,4],[5,6],[7,8,9],[10,11]];
@@ -493,7 +576,7 @@ function showDetail(code){
     const v=sums[i], max=[30,20,20,15,15][i];
     return `<div class="bar"><span>${a}</span><div class="track"><div class="fill" style="width:${Math.max(2,Math.min(100,v/max*100))}%"></div></div><b>${v.toFixed(1)}</b></div>`;
   }).join("");
-  const rows = c.tr.map(p=>{
+  const rows = c.tr.filter(p=>c.y == null || YEARS[p[0]]>=c.y).map(p=>{
     const y=YEARS[p[0]];
     return `<tr><td>${y}</td><td>${p[1]==null?"–":p[1].toFixed(1)}</td><td>${p[2]==null?"–":fmt(p[2])}</td><td>${p[3]}</td><td>${p[4]==null?"–":p[4].toFixed(2)}</td></tr>`;
   }).join("");
@@ -506,7 +589,7 @@ function showDetail(code){
     </div>
     <div class="hint" style="margin-top:2px">${c.g} ${c.d} · ${c.s||"–"}${c.t?" · "+c.t:""}</div>
     <dl class="kv" style="margin-top:10px">
-      <dt>입지 점수</dt><dd style="color:#2f6fed">${c.x==null?"–":c.x.toFixed(2)}점</dd>
+      <dt>입지 점수</dt><dd style="color:#2f6fed">${scores.get(c.c).x==null?"산출 보류":fmt(scores.get(c.c).x,1)+"점"}</dd>
       <dt>평당가</dt><dd>${fmt(c.y2)}만${c.stl?` <span style="color:#b3731c;font-weight:600">(${c.stl}분기 전)</span>`:""}</dd>
       <dt>세대수</dt><dd>${fmt(c.h)}세대</dd>
       <dt>준공</dt><dd>${c.y?Math.round(c.y)+"년":"–"}</dd>
@@ -518,21 +601,19 @@ function showDetail(code){
       <dt>84㎡ 중위</dt><dd>${c.n84?fmtEok(c.p84)+` (${c.n84}건)`:"거래 없음"}</dd>
     </dl>
     <div style="margin-top:6px">
-      <div class="hint" style="font-weight:700;color:#6b7686">축별 점수</div>
+      ${currentEvidence(c)}
+      <details><summary>기존 종합점수 ${fmt(c.x,1)}점 · 12개 세부 근거</summary>
       <div class="bars">${bars}</div>
-    </div>
-    <div style="margin-top:12px">
       <div class="hint" style="font-weight:700;color:#6b7686">점수 산출 상세 근거</div>
       <div class="scd">${evidenceHtml(c)}</div>
       <div class="scnote" style="margin-top:7px;border-top:1px solid #f0f2f5;padding-top:6px">
-        12개 세부 항목 만점 합계가 입지 100점입니다. 거리·수량은 구간표로 환산합니다(예: 역 200m 이내 24점 만점, 800m 내 역 2곳 이상 3점 만점).
-      </div>
+        기존 종합점수는 12개 세부 항목을 합산합니다. 거리·수량은 구간표로 환산합니다(예: 역 200m 이내 24점 만점, 800m 내 역 2곳 이상 3점 만점).
+      </div></details>
     </div>
-    <div style="margin-top:8px">
-      <div class="hint" style="font-weight:700;color:#6b7686">연도별 궤적</div>
-      <table class="tiny"><thead><tr><th>연도</th><th>입지</th><th>평당</th><th>거래</th><th>전세가율</th></tr></thead>
+    <details><summary>준공 이후 연도별 기존 종합점수·가격</summary>
+      <table class="tiny"><thead><tr><th>연도</th><th>기존 종합</th><th>평당</th><th>거래</th><th>전세가율</th></tr></thead>
       <tbody>${rows||'<tr><td colspan="5">궤적 데이터 없음</td></tr>'}</tbody></table>
-    </div>`;
+    </details>`;
 }
 
 /* ---------- events ---------- */
@@ -602,6 +683,11 @@ document.getElementById("quick").onchange = e=>{
   render(); if(state.sel) plotlyTrajRefresh(state.sel);
 };
 
+document.getElementById("matches").onclick=e=>{
+  const row=e.target.closest("button[data-code]"); if(row) selectComplex(row.dataset.code);
+};
+document.getElementById("view").onchange=e=>{state.view=e.target.value;render();};
+
 /* ---------- boot ---------- */
 document.getElementById("scope").textContent =
   `서울 ${new Set(DATA.complexes.filter(c=>c.si==="서울").map(c=>c.g)).size}개 구 · 경기 ${new Set(DATA.complexes.filter(c=>c.si==="경기").map(c=>c.g)).size? '안양시':''}`.trim();
@@ -610,14 +696,8 @@ document.getElementById("subline").textContent =
   `시점 ${POINTS[0]} ~ ${POINTS[LAST]} · ` +
   `평당가 = 거래금액 ÷ (전용면적 × 1.33 ÷ 3.3058) · 세대수·준공은 K-apt, 실거래는 국토교통부 RTMS`;
 document.getElementById("foot").innerHTML =
-  `데이터: 국토교통부 실거래가 공개시스템(매매·전월세, 2016~2026) · K-apt 공동주택 단지정보 · 카카오 로컬(주변시설) · ` +
-  `입지 점수는 교통 30 · 교육 20 · 인프라 20 · 상품성 15 · 수요/환금성 15 = 100점.<br>` +
-  `가격 미표기 단지는 최근 3개월 59~85.5㎡ 실거래가 없어 9분면에 표시되지 않습니다(통계에는 포함). ` +
-  `2026년 11월은 신고 지연으로 거래 건수가 적을 수 있습니다.<br>` +
-  `건축연도 필터는 준공연도 기준(5년 이내 = 2021년 이후, 10년 이상 = 2015년 이전)이며 준공연도 미상 단지는 '전체'에서만 표시됩니다. ` +
-  `지하철 노선 필터와 노선 수 점수는 단지 반경 1.5km 내 카카오 지하철역의 노선(중복 제거) 기준이며, 반경 내 역이 없거나 노선을 읽지 못한 단지만 K-apt 단지정보 기재를 대신 씁니다. ` +
-  `최고층수는 K-apt kaptTopFloor·ktownFlrNo 중 큰 값을 쓰고, 2층 이하·결측은 실거래 최고층과 건축물대장 지상층수로 보정합니다. ` +
-  `공원은 1단계 모델에서 미수집입니다.`;
+  `절대가격은 전용 59~85.5㎡ 거래의 공급면적 환산 평당가입니다. 최근 거래가 없으면 마지막 관측 분기를 표시합니다. 상대가격은 최신 3개월의 면적형별 거래만 비교합니다. 현재 입지점수와 과거 종합점수의 산식이 달라 과거 궤적은 기존 종합점수 보기에서 확인할 수 있습니다.<br>
+  출처 · 국토교통부 실거래가, K-apt, 카카오 로컬, 한국교육시설안전원, KTDB, © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> · <a href="https://github.com/Jiwoon625/Project-H#평가기준">산식과 자료 기준일</a>`;
 render();
 setTimeout(bindPlot, 800);
 </script>
