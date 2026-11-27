@@ -26,32 +26,32 @@ function distanceMeters(a, b) {
     (a.lng-b.lng)*111195*Math.cos((a.lat+b.lat)*radians/2));
 }
 
+// 1순위 같은 동(3곳 이상) → 2순위 같은 구(3곳 이상) → 3순위 반경 2km 인접 구·시(참고).
+// 3순위는 같은 구에서도 3곳을 못 채운 단지에만 적용하고 화면에서 '참고'로 구분한다.
 function peerComparisons(homes, area) {
   const price = 'p'+area, count = 'n'+area;
-  const groups = new Map(), results = new Map();
-  for (const h of homes) {
-    if (h.stl !== 0 || !(h[price] > 0 && h[count] > 0 && h.y > 0 && h.t) ||
-        !Number.isFinite(h.lat) || !Number.isFinite(h.lng)) continue;
-    const key = [h.si, h.g, h.t].join('|');
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(h);
-  }
-  for (const group of groups.values()) {
-    for (const h of group) {
-      const nearby = group.filter(p => p.c !== h.c && Math.abs(p.y-h.y) <= 5 &&
-        distanceMeters(h,p) <= 2000);
-      const local = nearby.filter(p => h.d && p.d === h.d);
-      const peers = local.length >= 3 ? local : nearby;
-      peers.sort((a,b) => a[price]-b[price] || a.c.localeCompare(b.c));
-      const n = peers.length;
-      const median = n >= 3 ? (peers[(n-1)>>1][price]+peers[n>>1][price])/2 : null;
-      const gap = median == null ? null : 100*(h[price]/median-1);
-      const trades = peers.reduce((sum,p) => sum+p[count],0);
-      const confidence = median == null ? '비교 부족' : h[count] === 1 ? '낮음' :
-        (h[count] >= 3 && n >= 5 && trades >= 10 ? '높음' : '보통');
-      results.set(h.c,{peers, median, gap, trades, confidence,
-        scope:local.length>=3 ? '같은 동' : '같은 구'});
-    }
+  const eligible = homes.filter(h => h.stl === 0 && h[price] > 0 && h[count] > 0 && h.y > 0 && h.t &&
+    Number.isFinite(h.lat) && Number.isFinite(h.lng));
+  const results = new Map();
+  for (const h of eligible) {
+    const near = eligible.filter(p => p.c !== h.c && p.t === h.t && Math.abs(p.y-h.y) <= 5 &&
+      distanceMeters(h,p) <= 2000);
+    const local = near.filter(p => h.si === p.si && h.g === p.g && h.d && p.d === h.d);
+    const district = near.filter(p => h.si === p.si && h.g === p.g);
+    let peers, scope, adjacent = false;
+    if (local.length >= 3) { peers = local; scope = '같은 동'; }
+    else if (district.length >= 3) { peers = district; scope = '같은 구'; }
+    else if (near.length >= 3) { peers = near; scope = '같은 구'; adjacent = true; }
+    else { peers = district; scope = '같은 구'; }
+    peers = peers.slice().sort((a,b) => a[price]-b[price] || a.c.localeCompare(b.c));
+    const n = peers.length;
+    const median = n >= 3 ? (peers[(n-1)>>1][price]+peers[n>>1][price])/2 : null;
+    const gap = median == null ? null : 100*(h[price]/median-1);
+    const trades = peers.reduce((sum,p) => sum+p[count],0);
+    const confidence = median == null ? '비교 부족' : h[count] === 1 ? '낮음' :
+      (h[count] >= 3 && n >= 5 && trades >= 10 ? '높음' : '보통');
+    results.set(h.c,{peers, median, gap, trades, confidence, scope, adjacent,
+      crossDistrict: adjacent && peers.some(p => p.si !== h.si || p.g !== h.g)});
   }
   return results;
 }

@@ -100,6 +100,10 @@
   .chip b{color:#2b3444;font-weight:700}
   .chip.gen{background:#eaf7ef;border-color:#d5ecdf;color:#1d6b48}
   .scnote{font-size:10.5px;color:#98a1af;line-height:1.55;margin-top:4px}
+  .refbadge{background:#fdf3e3!important;color:#8a6114!important;margin-left:4px}
+  .unpin{border:0;background:#eef2f3;color:#37545d;font-family:inherit;font-size:11px;font-weight:600;
+         border-radius:5px;padding:3px 8px;margin-left:4px;cursor:pointer}
+  .unpin:hover{background:#e2e9ea}
 
   :root{--bg:#f4f6f7;--ink:#182d36;--muted:#6a7b83;--line:#e1e7e8;--accent:#16756a;--accent2:#16756a}
   body{font-family:Inter,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;color:var(--ink)}
@@ -299,32 +303,32 @@ function distanceMeters(a, b) {
     (a.lng-b.lng)*111195*Math.cos((a.lat+b.lat)*radians/2));
 }
 
+// 1순위 같은 동(3곳 이상) → 2순위 같은 구(3곳 이상) → 3순위 반경 2km 인접 구·시(참고).
+// 3순위는 같은 구에서도 3곳을 못 채운 단지에만 적용하고 화면에서 '참고'로 구분한다.
 function peerComparisons(homes, area) {
   const price = 'p'+area, count = 'n'+area;
-  const groups = new Map(), results = new Map();
-  for (const h of homes) {
-    if (h.stl !== 0 || !(h[price] > 0 && h[count] > 0 && h.y > 0 && h.t) ||
-        !Number.isFinite(h.lat) || !Number.isFinite(h.lng)) continue;
-    const key = [h.si, h.g, h.t].join('|');
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(h);
-  }
-  for (const group of groups.values()) {
-    for (const h of group) {
-      const nearby = group.filter(p => p.c !== h.c && Math.abs(p.y-h.y) <= 5 &&
-        distanceMeters(h,p) <= 2000);
-      const local = nearby.filter(p => h.d && p.d === h.d);
-      const peers = local.length >= 3 ? local : nearby;
-      peers.sort((a,b) => a[price]-b[price] || a.c.localeCompare(b.c));
-      const n = peers.length;
-      const median = n >= 3 ? (peers[(n-1)>>1][price]+peers[n>>1][price])/2 : null;
-      const gap = median == null ? null : 100*(h[price]/median-1);
-      const trades = peers.reduce((sum,p) => sum+p[count],0);
-      const confidence = median == null ? '비교 부족' : h[count] === 1 ? '낮음' :
-        (h[count] >= 3 && n >= 5 && trades >= 10 ? '높음' : '보통');
-      results.set(h.c,{peers, median, gap, trades, confidence,
-        scope:local.length>=3 ? '같은 동' : '같은 구'});
-    }
+  const eligible = homes.filter(h => h.stl === 0 && h[price] > 0 && h[count] > 0 && h.y > 0 && h.t &&
+    Number.isFinite(h.lat) && Number.isFinite(h.lng));
+  const results = new Map();
+  for (const h of eligible) {
+    const near = eligible.filter(p => p.c !== h.c && p.t === h.t && Math.abs(p.y-h.y) <= 5 &&
+      distanceMeters(h,p) <= 2000);
+    const local = near.filter(p => h.si === p.si && h.g === p.g && h.d && p.d === h.d);
+    const district = near.filter(p => h.si === p.si && h.g === p.g);
+    let peers, scope, adjacent = false;
+    if (local.length >= 3) { peers = local; scope = '같은 동'; }
+    else if (district.length >= 3) { peers = district; scope = '같은 구'; }
+    else if (near.length >= 3) { peers = near; scope = '같은 구'; adjacent = true; }
+    else { peers = district; scope = '같은 구'; }
+    peers = peers.slice().sort((a,b) => a[price]-b[price] || a.c.localeCompare(b.c));
+    const n = peers.length;
+    const median = n >= 3 ? (peers[(n-1)>>1][price]+peers[n>>1][price])/2 : null;
+    const gap = median == null ? null : 100*(h[price]/median-1);
+    const trades = peers.reduce((sum,p) => sum+p[count],0);
+    const confidence = median == null ? '비교 부족' : h[count] === 1 ? '낮음' :
+      (h[count] >= 3 && n >= 5 && trades >= 10 ? '높음' : '보통');
+    results.set(h.c,{peers, median, gap, trades, confidence, scope, adjacent,
+      crossDistrict: adjacent && peers.some(p => p.si !== h.si || p.g !== h.g)});
   }
   return results;
 }
@@ -337,7 +341,8 @@ const CUTS = {
   metro:  {x:[30,60], y:[2000,3500], label:"수도권 (X 30/60점 · Y 2,000/3,500만)"},
   nation: {x:[30,60], y:[1500,3000], label:"전국 (X 30/60점 · Y 1,500/3,000만)"}
 };
-const state = {view:"r59", preset:"metro", period:10, sido:"", gu:"", q:"", quick:false, sizeMode:"fix",
+// 처음 화면은 서울만 그린다(전체 지역은 필터에서 고른다). 데이터가 늘어 초기 렌더 비용이 커졌기 때문.
+const state = {view:"r59", preset:"metro", period:10, sido:"서울", gu:"", q:"", quick:false, sizeMode:"fix",
                age:"all", line:"", sel:null};
 const POOL = DATA.pool || [], SNM = i => POOL[i] || "";
 const SMA = (DATA.meta && DATA.meta.smax) || [24,3,3,12,8,10,10,6,5,4,8,7];
@@ -405,6 +410,7 @@ function fillGu(){
 }
 const sidoSel = document.getElementById("sido"), guSel = document.getElementById("gu");
 sidoSel.innerHTML = '<option value="">전체 지역</option>' + sidos.map(s=>`<option value="${s}">${s}</option>`).join("");
+sidoSel.value = state.sido;
 sidoSel.onchange = ()=>{ state.sido = sidoSel.value; fillGu(); render(); };
 guSel.onchange = ()=>{ state.gu = guSel.value; render(); };
 fillGu();
@@ -489,10 +495,11 @@ function layout(){
     ...cuts.y.map(v=>({type:"line",y0:v,y1:v,x0:0,x1:1,xref:"paper",line:{color:"#c9d0da",width:1,dash:"dot"}}))
   ];
   return {
-    margin:{l:58,r:20,t:30,b:52}, hovermode:"closest", dragmode:"pan",
+    margin:{l:72,r:22,t:30,b:52}, hovermode:"closest", dragmode:"pan",
     shapes,
-    xaxis:{title:{text:state.view === "history" ? "기존 종합점수 (점)" : "입지점수 (점)",font:{size:12}}, range:[0,100], gridcolor:"#eef1f5", zeroline:false},
-    yaxis:{title:{text:isRelative() ? areaOf()+"㎡ 비교단지 대비 가격 차이 (%)" : "평당가 (만원/평 · 공급면적 환산)",font:{size:12}}, gridcolor:"#eef1f5", zeroline:false},
+    // automargin: 긴 Y축 제목이 왼쪽 여백에 잘리지 않도록 실제 글자 폭만큼 여백을 늘린다.
+    xaxis:{title:{text:state.view === "history" ? "기존 종합점수 (점)" : "입지점수 (점)",font:{size:12}}, range:[0,100], automargin:true, gridcolor:"#eef1f5", zeroline:false},
+    yaxis:{title:{text:isRelative() ? areaOf()+"㎡ 비교단지 대비 가격 차이 (%)" : "평당가 (만원/평 · 공급면적 환산)",font:{size:12}}, automargin:true, gridcolor:"#eef1f5", zeroline:false},
     legend:{orientation:"h", y:-0.22, x:0, font:{size:10,color:"#6a7b83"}},
     plot_bgcolor:"#fff", paper_bgcolor:"#fff",
     annotations:[
@@ -546,7 +553,7 @@ function updateStats(){
     `<span class="pill">단지 <b>${fmt(list.length)}</b></span>`+
     `<span class="pill">차트 표시 <b>${fmt(priced.length)}</b></span>`+
     `<span class="pill">입지 상·시세 하 <b style="color:#16756a">${fmt(nHi)}</b></span>`+
-    `<span class="pill">지역 <b>${gus.size}</b>개 구</span>`+
+    `<span class="pill">지역 <b>${gus.size}</b>개 시·구</span>`+
     `<span class="pill">기준 ${cuts.label}</span>`;
 }
 /* ---------- 선택 지역의 입지 상·시세 하 목록 ---------- */
@@ -605,6 +612,7 @@ function syncListSel(code){
 }
 function selectComplex(code){
   const c = DATA.complexes.find(z=>z.c===code); if (!c) return;
+  pinned = true;                    // 클릭 선택은 고정 — 이후 hover가 덮지 않는다
   lastHover = code;
   showDetail(code);
   plotlyTrajRefresh(code, true);
@@ -676,13 +684,15 @@ function comparisonPanel(c,area){
   const r=comparisons["r"+area].get(c.c);
   const month=ACCESS.snapshot===DATA.generated ? accessFor(c)?.months?.[area] : null;
   const date=month || (c["n"+area] ? "월 미확인 · "+POINTS[LAST] : "해당 기간 거래 없음");
-  const summary=`${area}㎡ · ${gapText(r?.gap)} · ${r?.confidence||"자료 부족"}`;
+  const adjacent=!!r?.adjacent;
+  const badge=adjacent?` <span class="badge refbadge">인접 구 포함(참고)</span>`:"";
+  const summary=`${area}㎡ · ${gapText(r?.gap)} · ${r?.confidence||"자료 부족"}${adjacent?" · 인접 구 포함":""}`;
   const prices=r?.peers.map(p=>`<tr><td>${esc(p.n)}</td><td>${fmtEok(p["p"+area])}</td><td>${p["n"+area]}</td></tr>`).join("") || "";
   return `<details ${isRelative() && area===areaOf()?"open":""}><summary>${summary}</summary>
     <dl class="kv"><dt>우리 단지 중위가격</dt><dd>${fmtEok(c["p"+area])} · ${c["n"+area]||0}건</dd>
     <dt>최근 계약월</dt><dd>${date}</dd><dt>비교단지 중위가격</dt><dd>${fmtEok(r?.median)}</dd>
-    <dt>비교 근거</dt><dd>${r?.scope||"–"} · ${r?.peers.length||0}곳 · ${r?.trades||0}건</dd></dl>
-    <p class="sources">같은 주택유형·면적형, 2km 이내, 준공 ±5년. 같은 동에서 3곳 미만이면 같은 구까지 비교합니다.</p>
+    <dt>비교 근거</dt><dd>${r?.scope||"–"} · ${r?.peers.length||0}곳 · ${r?.trades||0}건${badge}</dd></dl>
+    <p class="sources">같은 주택유형·면적형, 2km 이내, 준공 ±5년. 같은 동 3곳 이상이면 그 표본을, 부족하면 같은 구 3곳 이상을 씁니다.${adjacent?" 이 단지는 같은 구에서 3곳을 채우지 못해 반경 2km 인접 구·시 단지까지 함께 비교했습니다(참고용).":""}</p>
     ${prices?`<details><summary>비교한 단지와 거래가</summary><table class="tiny"><tr><th>단지</th><th>중위가격</th><th>건수</th></tr>${prices}</table></details>`:""}
     </details>`;
 }
@@ -728,6 +738,7 @@ function showDetail(code){
       <h2>${c.n}</h2><span class="badge">${q}</span>
     </div>
     <div class="hint" style="margin-top:2px">${c.g} ${c.d} · ${c.s||"–"}${c.t?" · "+c.t:""}</div>
+    <div class="hint" style="margin-top:5px">선택 고정됨 · 다른 단지를 클릭하면 바뀌고 차트 빈 곳을 더블클릭하면 해제됩니다.<button type="button" class="unpin" data-unpin="1">선택 해제</button></div>
     <dl class="kv" style="margin-top:10px">
       <dt>입지 점수</dt><dd style="color:#16756a">${scores.get(c.c).x==null?"산출 보류":fmt(scores.get(c.c).x,1)+"점"}</dd>
       <dt>평당가</dt><dd>${fmt(c.y2)}만${c.stl?` <span style="color:#977238;font-weight:600">(${c.stl}분기 전)</span>`:""}</dd>
@@ -758,11 +769,21 @@ function showDetail(code){
 
 /* ---------- events ---------- */
 let lastHover = null;
+// 클릭(또는 목록 선택)하면 상세를 고정해, 차트 위를 지나가는 hover가 고른 단지를 덮지 않게 한다.
+let pinned = false;
+function clearSelection(){
+  pinned = false; state.sel = null; lastHover = null;
+  document.getElementById("detail").style.display = "none";
+  document.getElementById("empty").style.display = "block";
+  syncListSel(null);
+  plotlyTrajRefresh(null);
+}
 function bindPlot(){
   // Plotly 는 plotly_* 이벤트를 내부 이미터(gd.on)로만 발생시킨다. DOM addEventListener 로는
   // 전달되지 않아 클릭·호버 시 상세 패널이 갱신되지 않으므로 on() 을 우선 사용한다.
   const on = (ev,fn)=> (typeof plotEl.on === "function") ? plotEl.on(ev,fn) : plotEl.addEventListener(ev,fn);
   on("plotly_hover", e=>{
+    if (pinned) return;                       // 클릭으로 고정한 상세는 hover로 덮지 않는다
     const p = e.points && e.points[0]; if (!p || !/^scatter/.test(p.data.type)) return;
     const code = p.customdata && p.customdata[0];
     if (!code || code===lastHover) return;
@@ -776,9 +797,7 @@ function bindPlot(){
     const code = p.customdata && p.customdata[0]; if (!code) return;
     selectComplex(code);
   });
-  on("plotly_doubleclick", ()=>{ state.sel=null; lastHover=null;
-    document.getElementById("detail").style.display="none";
-    document.getElementById("empty").style.display="block"; syncListSel(null); render(); });
+  on("plotly_doubleclick", ()=>{ clearSelection(); render(); });
 }
 // 궤적만 추가/교체 (전체 재렌더 없이 빠르게). 연속 hover·click 이 겹치면 궤적이 두 개 남는
 // 경쟁 조건이 생기므로 작업을 순차 처리하고, 밀린 요청은 건너뛴다.
@@ -826,11 +845,18 @@ document.getElementById("quick").onchange = e=>{
 document.getElementById("matches").onclick=e=>{
   const row=e.target.closest("button[data-code]"); if(row) selectComplex(row.dataset.code);
 };
+document.getElementById("detail").addEventListener("click", e=>{
+  if (e.target.closest("[data-unpin]")) clearSelection();
+});
 document.getElementById("view").onchange=e=>{state.view=e.target.value;render();};
 
 /* ---------- boot ---------- */
-document.getElementById("scope").textContent =
-  `서울 ${new Set(DATA.complexes.filter(c=>c.si==="서울").map(c=>c.g)).size}개 구 · 경기 ${new Set(DATA.complexes.filter(c=>c.si==="경기").map(c=>c.g)).size? '안양시':''}`.trim();
+(()=>{
+  const gu = new Set(DATA.complexes.filter(c=>c.si==="서울").map(c=>c.g));
+  const gi = [...new Set(DATA.complexes.filter(c=>c.si==="경기").map(c=>c.g))];
+  document.getElementById("scope").textContent =
+    `서울 ${gu.size}개 구` + (gi.length ? ` · 경기 ${gi.length}개 시(${gi.join("·")})` : "");
+})();
 document.getElementById("subline").textContent =
   `기준 ${DATA.generated} · 단지 ${fmt(DATA.complexes.length)}개 · ` +
   `시점 ${POINTS[0]} ~ ${POINTS[LAST]} · ` +
