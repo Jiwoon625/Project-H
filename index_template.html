@@ -433,7 +433,7 @@ function layout(){
     ...cuts.y.map(v=>({type:"line",y0:v,y1:v,x0:0,x1:1,xref:"paper",line:{color:"#c9d0da",width:1,dash:"dot"}}))
   ];
   return {
-    margin:{l:72,r:22,t:30,b:52}, hovermode:"closest", dragmode:"pan",
+    margin:{l:88,r:22,t:30,b:52}, hovermode:"closest", dragmode:"pan",
     shapes,
     // automargin: 긴 Y축 제목이 왼쪽 여백에 잘리지 않도록 실제 글자 폭만큼 여백을 늘린다.
     xaxis:{title:{text:state.view === "history" ? "기존 종합점수 (점)" : "입지점수 (점)",font:{size:12}}, range:[0,100], automargin:true, gridcolor:"#eef1f5", zeroline:false},
@@ -491,7 +491,7 @@ function updateStats(){
     `<span class="pill">단지 <b>${fmt(list.length)}</b></span>`+
     `<span class="pill">차트 표시 <b>${fmt(priced.length)}</b></span>`+
     `<span class="pill">입지 상·시세 하 <b style="color:#16756a">${fmt(nHi)}</b></span>`+
-    `<span class="pill">지역 <b>${gus.size}</b>개 시·구</span>`+
+    `<span class="pill">지역 <b>${gus.size}</b>개</span>`+
     `<span class="pill">기준 ${cuts.label}</span>`;
 }
 /* ---------- 선택 지역의 입지 상·시세 하 목록 ---------- */
@@ -790,8 +790,8 @@ document.getElementById("view").onchange=e=>{state.view=e.target.value;render();
 
 /* ---------- boot ---------- */
 (()=>{
-  const gu = new Set(DATA.complexes.filter(c=>c.si==="서울").map(c=>c.g));
-  const gi = [...new Set(DATA.complexes.filter(c=>c.si==="경기").map(c=>c.g))];
+  const gu = new Set(DATA.districts.filter(d=>d.s==="서울").map(d=>d.n));
+  const gi = [...new Set(DATA.districts.filter(d=>d.s==="경기").map(d=>d.n))];
   document.getElementById("scope").textContent =
     `서울 ${gu.size}개 구` + (gi.length ? ` · 경기 ${gi.length}개 시(${gi.join("·")})` : "");
 })();
